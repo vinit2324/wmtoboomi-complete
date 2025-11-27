@@ -1,8 +1,17 @@
 import asyncio
+import os
 from motor.motor_asyncio import AsyncIOMotorClient
+from dotenv import load_dotenv
+
+load_dotenv()
+
+MONGODB_URL = os.getenv("MONGODB_URL")
+if not MONGODB_URL:
+    print("❌ Error: MONGODB_URL not set in .env")
+    exit(1)
 
 async def cleanup():
-    client = AsyncIOMotorClient("mongodb+srv://vinit:Delhi123@vvmdb1.6umwxkw.mongodb.net/wmtoboomi?retryWrites=true&w=majority&appName=VVMDB1")
+    client = AsyncIOMotorClient(MONGODB_URL)
     db = client.wmtoboomi
     
     # Delete all projects
