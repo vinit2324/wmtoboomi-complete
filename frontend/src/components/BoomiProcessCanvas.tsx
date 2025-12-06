@@ -1,254 +1,185 @@
-import React, { useCallback, useMemo } from 'react';
+import React, { useMemo } from 'react';
 import ReactFlow, {
   Node,
   Edge,
-  Controls,
   Background,
+  Controls,
+  MiniMap,
   useNodesState,
   useEdgesState,
-  MarkerType,
-  Handle,
   Position,
-  MiniMap,
 } from 'reactflow';
 import 'reactflow/dist/style.css';
-import { Eye, Zap, CheckCircle } from 'lucide-react';
-
-interface FlowStep {
-  type: string;
-  name: string;
-}
+import { Play, Square, Eye, Zap, Database, GitMerge, Shield } from 'lucide-react';
 
 interface BoomiProcessCanvasProps {
-  flowSteps: FlowStep[];
+  flowSteps: any[];
   serviceName: string;
-  onViewStep: (step: FlowStep, index: number) => void;
-  onConvertStep: (step: FlowStep, index: number) => void;
+  sourceDocuments?: any[];
+  targetDocuments?: any[];
+  adapters?: string[];
+  onViewStep: (step: any, index: number) => void;
+  onConvertStep: (step: any, index: number) => void;
   convertedSteps: Set<number>;
 }
 
-// Custom Node Component
-function BoomiShapeNode({ data }: { data: any }) {
-  const isConverted = data.converted;
-  
-  return (
-    <div className={`px-3 py-2 rounded-lg border-2 min-w-[180px] ${
-      isConverted 
-        ? 'bg-green-100 border-green-500' 
-        : 'bg-white border-jade-blue'
-    }`}>
-      <Handle type="target" position={Position.Top} className="w-2 h-2" />
-      
-      <div className="flex items-center justify-between gap-2">
-        <div className="flex items-center gap-2">
-          <span className="text-sm">{data.icon}</span>
-          <div>
-            <div className="font-semibold text-xs text-jade-blue">{data.boomiShape}</div>
-            <div className="text-[10px] text-gray-500 truncate max-w-[100px]">{data.stepName}</div>
-          </div>
-        </div>
-        
-        <div className="flex gap-1">
-          <button
-            onClick={(e) => { e.stopPropagation(); data.onView(); }}
-            className="p-1 bg-jade-blue text-white rounded hover:bg-jade-blue-dark"
-            title="View Details"
-          >
-            <Eye size={12} />
-          </button>
-          {!isConverted ? (
-            <button
-              onClick={(e) => { e.stopPropagation(); data.onConvert(); }}
-              className="p-1 bg-jade-gold text-jade-blue-dark rounded hover:bg-jade-gold-dark"
-              title="Convert"
-            >
-              <Zap size={12} />
-            </button>
-          ) : (
-            <span className="p-1 bg-green-500 text-white rounded">
-              <CheckCircle size={12} />
-            </span>
-          )}
-        </div>
-      </div>
-      
-      <Handle type="source" position={Position.Bottom} className="w-2 h-2" />
-    </div>
-  );
-}
-
-// Start/End Node Component
-function StartEndNode({ data }: { data: any }) {
-  return (
-    <div className={`px-4 py-2 rounded-full font-bold text-white text-sm ${
-      data.isStart ? 'bg-jade-blue' : 'bg-jade-blue'
-    }`}>
-      {data.isStart && <Handle type="source" position={Position.Bottom} className="w-2 h-2" />}
-      {!data.isStart && <Handle type="target" position={Position.Top} className="w-2 h-2" />}
-      <span>{data.label}</span>
-    </div>
-  );
-}
-
-const nodeTypes = {
-  boomiShape: BoomiShapeNode,
-  startEnd: StartEndNode,
-};
-
-export default function BoomiProcessCanvas({
-  flowSteps,
-  serviceName,
-  onViewStep,
-  onConvertStep,
-  convertedSteps
-}: BoomiProcessCanvasProps) {
-  
-  // Map webMethods step to Boomi shape info
-  const getBoomiShapeInfo = (stepType: string) => {
-    switch (stepType) {
-      case 'MAP':
-        return { icon: '🔄', boomiShape: 'Map Shape', color: '#E8F5F0' };
-      case 'BRANCH':
-        return { icon: '🔀', boomiShape: 'Decision Shape', color: '#FFF3E0' };
-      case 'LOOP':
-        return { icon: '🔁', boomiShape: 'ForEach Shape', color: '#E3F2FD' };
-      case 'INVOKE':
-        return { icon: '🔌', boomiShape: 'Connector Shape', color: '#F3E5F5' };
-      case 'SEQUENCE':
-        return { icon: '📦', boomiShape: 'Try/Catch Shape', color: '#FFF8E1' };
-      case 'EXIT':
-        return { icon: '🛑', boomiShape: 'Stop Shape', color: '#FFEBEE' };
-      default:
-        return { icon: '⚡', boomiShape: 'Business Rules', color: '#FAFAFA' };
+const BoomiShapeNode = ({ data }: { data: any }) => {
+  const getShapeStyle = () => {
+    const baseStyle = "px-4 py-3 rounded-lg border-2 shadow-md min-w-[180px] text-center";
+    switch (data.shapeType) {
+      case 'start': return `${baseStyle} bg-jade-blue text-white border-jade-blue`;
+      case 'end': return `${baseStyle} bg-jade-blue text-white border-jade-blue`;
+      case 'connector-source': return `${baseStyle} bg-purple-100 border-purple-400 text-purple-800`;
+      case 'connector-target': return `${baseStyle} bg-indigo-100 border-indigo-400 text-indigo-800`;
+      case 'map': return `${baseStyle} bg-amber-100 border-amber-400 text-amber-800`;
+      case 'try-catch': return `${baseStyle} bg-red-100 border-red-400 text-red-800`;
+      default: return `${baseStyle} bg-gray-100 border-gray-400 text-gray-800`;
     }
   };
-  
-  // Calculate height based on number of steps
-  const canvasHeight = Math.max(400, Math.min(800, (flowSteps.length + 2) * 70));
-  
-  // Generate nodes from flow steps
-  const initialNodes: Node[] = useMemo(() => {
-    const nodes: Node[] = [];
-    let yPos = 30;
-    const spacing = 65;
-    
-    // Start shape
-    nodes.push({
-      id: 'start',
-      type: 'startEnd',
-      data: { label: '▶ Start', isStart: true },
-      position: { x: 250, y: yPos },
-    });
-    yPos += spacing;
-    
-    // Flow step shapes
-    flowSteps.forEach((step, idx) => {
-      const shapeInfo = getBoomiShapeInfo(step.type);
-      const isConverted = convertedSteps.has(idx);
-      
-      nodes.push({
-        id: `step-${idx}`,
-        type: 'boomiShape',
-        data: {
-          ...shapeInfo,
-          stepName: step.name || `Step ${idx + 1}`,
-          stepType: step.type,
-          stepIndex: idx,
-          converted: isConverted,
-          onView: () => onViewStep(step, idx),
-          onConvert: () => onConvertStep(step, idx),
-        },
-        position: { x: 200, y: yPos },
-      });
-      yPos += spacing;
-    });
-    
-    // End shape
-    nodes.push({
-      id: 'end',
-      type: 'startEnd',
-      data: { label: '⏹ End', isStart: false },
-      position: { x: 250, y: yPos },
-    });
-    
-    return nodes;
-  }, [flowSteps, convertedSteps, onViewStep, onConvertStep]);
-  
-  // Generate edges (connections)
-  const initialEdges: Edge[] = useMemo(() => {
-    const edges: Edge[] = [];
-    
-    if (flowSteps.length > 0) {
-      edges.push({
-        id: 'e-start-step0',
-        source: 'start',
-        target: 'step-0',
-        animated: true,
-        style: { stroke: '#FDB913', strokeWidth: 2 },
-        markerEnd: { type: MarkerType.ArrowClosed, color: '#FDB913' }
-      });
-      
-      for (let i = 0; i < flowSteps.length - 1; i++) {
-        edges.push({
-          id: `e-step${i}-step${i + 1}`,
-          source: `step-${i}`,
-          target: `step-${i + 1}`,
-          animated: true,
-          style: { stroke: '#003B5C', strokeWidth: 2 },
-          markerEnd: { type: MarkerType.ArrowClosed, color: '#003B5C' }
-        });
-      }
-      
-      edges.push({
-        id: `e-step${flowSteps.length - 1}-end`,
-        source: `step-${flowSteps.length - 1}`,
-        target: 'end',
-        animated: true,
-        style: { stroke: '#FDB913', strokeWidth: 2 },
-        markerEnd: { type: MarkerType.ArrowClosed, color: '#FDB913' }
-      });
-    } else {
-      edges.push({
-        id: 'e-start-end',
-        source: 'start',
-        target: 'end',
-        animated: true,
-        style: { stroke: '#003B5C', strokeWidth: 2 },
-        markerEnd: { type: MarkerType.ArrowClosed, color: '#003B5C' }
-      });
+
+  const getIcon = () => {
+    switch (data.shapeType) {
+      case 'start': return <Play size={16} className="inline mr-2" />;
+      case 'end': return <Square size={16} className="inline mr-2" />;
+      case 'connector-source':
+      case 'connector-target': return <Database size={16} className="inline mr-2" />;
+      case 'map': return <GitMerge size={16} className="inline mr-2" />;
+      case 'try-catch': return <Shield size={16} className="inline mr-2" />;
+      default: return null;
     }
-    
-    return edges;
-  }, [flowSteps]);
-  
-  const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
-  const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
-  
+  };
+
   return (
-    <div 
-      className="border-2 border-jade-blue rounded-lg bg-gray-50"
-      style={{ height: `${canvasHeight}px` }}
-    >
-      <ReactFlow
-        nodes={nodes}
-        edges={edges}
-        onNodesChange={onNodesChange}
-        onEdgesChange={onEdgesChange}
-        nodeTypes={nodeTypes}
-        fitView
-        fitViewOptions={{ padding: 0.3, minZoom: 0.3, maxZoom: 1.5 }}
-        minZoom={0.2}
-        maxZoom={2}
-        defaultViewport={{ x: 0, y: 0, zoom: 0.8 }}
-        attributionPosition="bottom-left"
-      >
-        <Controls showInteractive={false} />
-        <MiniMap 
-          nodeColor={() => '#003B5C'}
-          maskColor="rgba(0, 59, 92, 0.1)"
-          className="bg-white border border-gray-300"
-        />
-        <Background color="#003B5C" gap={20} size={1} />
+    <div className={getShapeStyle()}>
+      <div className="font-semibold text-sm flex items-center justify-center">
+        {getIcon()}{data.label}
+      </div>
+      {data.subLabel && <div className="text-xs opacity-75 mt-1">{data.subLabel}</div>}
+      {data.showActions && (
+        <div className="flex gap-1 mt-2 justify-center">
+          <button onClick={(e) => { e.stopPropagation(); data.onView?.(); }} className="p-1 bg-white bg-opacity-50 rounded hover:bg-opacity-100" title="View"><Eye size={14} /></button>
+          <button onClick={(e) => { e.stopPropagation(); data.onConvert?.(); }} className={`p-1 rounded ${data.isConverted ? 'bg-green-200' : 'bg-jade-gold'}`} title={data.isConverted ? 'Converted' : 'Convert'}><Zap size={14} /></button>
+        </div>
+      )}
+    </div>
+  );
+};
+
+const nodeTypes = { boomiShape: BoomiShapeNode };
+
+export default function BoomiProcessCanvas({
+  flowSteps, serviceName, sourceDocuments = [], targetDocuments = [], adapters = [],
+  onViewStep, onConvertStep, convertedSteps
+}: BoomiProcessCanvasProps) {
+  
+  const { nodes, edges } = useMemo(() => {
+    const generatedNodes: Node[] = [];
+    const generatedEdges: Edge[] = [];
+    const centerX = 400;
+    let currentY = 50;
+    const ySpacing = 90;
+    
+    // Start
+    generatedNodes.push({
+      id: 'start', type: 'boomiShape',
+      position: { x: centerX - 60, y: currentY },
+      data: { label: 'Start', shapeType: 'start' },
+      sourcePosition: Position.Bottom, targetPosition: Position.Top,
+    });
+    currentY += ySpacing;
+    let lastNodeId = 'start';
+    
+    const sourceAdapter = adapters[0] || 'Source';
+    const targetAdapter = adapters.length > 1 ? adapters[1] : (adapters[0] === 'Salesforce' ? 'Database' : adapters[0] || 'Target');
+    
+    // Try/Catch
+    generatedNodes.push({
+      id: 'try-catch', type: 'boomiShape',
+      position: { x: centerX - 90, y: currentY },
+      data: { label: 'Try/Catch', subLabel: 'Error Handling', shapeType: 'try-catch', showActions: true, isConverted: convertedSteps.has(-1),
+        onView: () => onViewStep({ type: 'SEQUENCE', name: 'Try/Catch' }, -1),
+        onConvert: () => onConvertStep({ type: 'SEQUENCE', name: 'Try/Catch' }, -1)
+      },
+      sourcePosition: Position.Bottom, targetPosition: Position.Top,
+    });
+    generatedEdges.push({ id: `${lastNodeId}-try-catch`, source: lastNodeId, target: 'try-catch', animated: true, style: { stroke: '#0F4C75' } });
+    currentY += ySpacing;
+    lastNodeId = 'try-catch';
+    
+    // Source Connector
+    generatedNodes.push({
+      id: 'source-connector', type: 'boomiShape',
+      position: { x: centerX - 90, y: currentY },
+      data: { label: `${sourceAdapter} Connector`, subLabel: 'Get Source Data', shapeType: 'connector-source', showActions: true, isConverted: convertedSteps.has(0),
+        onView: () => onViewStep({ type: 'INVOKE', name: `${sourceAdapter} Query` }, 0),
+        onConvert: () => onConvertStep({ type: 'INVOKE', name: `${sourceAdapter} Query` }, 0)
+      },
+      sourcePosition: Position.Bottom, targetPosition: Position.Top,
+    });
+    generatedEdges.push({ id: `${lastNodeId}-source`, source: lastNodeId, target: 'source-connector', animated: true, style: { stroke: '#0F4C75' } });
+    currentY += ySpacing;
+    lastNodeId = 'source-connector';
+    
+    // Map
+    const sourceName = sourceDocuments[0]?.name?.split('/').pop() || 'Source';
+    const targetName = targetDocuments[0]?.name?.split('/').pop() || 'Target';
+    generatedNodes.push({
+      id: 'map', type: 'boomiShape',
+      position: { x: centerX - 90, y: currentY },
+      data: { label: 'Map Shape', subLabel: `${sourceName} → ${targetName}`, shapeType: 'map', showActions: true, isConverted: convertedSteps.has(1),
+        onView: () => onViewStep({ type: 'MAP', name: 'Data Transformation' }, 1),
+        onConvert: () => onConvertStep({ type: 'MAP', name: 'Data Transformation' }, 1)
+      },
+      sourcePosition: Position.Bottom, targetPosition: Position.Top,
+    });
+    generatedEdges.push({ id: `${lastNodeId}-map`, source: lastNodeId, target: 'map', animated: true, style: { stroke: '#0F4C75' } });
+    currentY += ySpacing;
+    lastNodeId = 'map';
+    
+    // Target Connector
+    generatedNodes.push({
+      id: 'target-connector', type: 'boomiShape',
+      position: { x: centerX - 90, y: currentY },
+      data: { label: `${targetAdapter} Connector`, subLabel: 'Send Target Data', shapeType: 'connector-target', showActions: true, isConverted: convertedSteps.has(2),
+        onView: () => onViewStep({ type: 'INVOKE', name: `${targetAdapter} Send` }, 2),
+        onConvert: () => onConvertStep({ type: 'INVOKE', name: `${targetAdapter} Send` }, 2)
+      },
+      sourcePosition: Position.Bottom, targetPosition: Position.Top,
+    });
+    generatedEdges.push({ id: `${lastNodeId}-target`, source: lastNodeId, target: 'target-connector', animated: true, style: { stroke: '#0F4C75' } });
+    currentY += ySpacing;
+    lastNodeId = 'target-connector';
+    
+    // End
+    generatedNodes.push({
+      id: 'end', type: 'boomiShape',
+      position: { x: centerX - 60, y: currentY },
+      data: { label: 'End', shapeType: 'end' },
+      sourcePosition: Position.Bottom, targetPosition: Position.Top,
+    });
+    generatedEdges.push({ id: `${lastNodeId}-end`, source: lastNodeId, target: 'end', animated: true, style: { stroke: '#0F4C75' } });
+    
+    return { nodes: generatedNodes, edges: generatedEdges };
+  }, [flowSteps, sourceDocuments, targetDocuments, adapters, convertedSteps, onViewStep, onConvertStep]);
+
+  const [nodesState, , onNodesChange] = useNodesState(nodes);
+  const [edgesState, , onEdgesChange] = useEdgesState(edges);
+
+  return (
+    <div className="h-[500px] bg-white rounded-lg border-2 border-gray-200 overflow-hidden">
+      <ReactFlow nodes={nodesState} edges={edgesState} onNodesChange={onNodesChange} onEdgesChange={onEdgesChange} nodeTypes={nodeTypes} fitView attributionPosition="bottom-left">
+        <Background color="#e5e7eb" gap={16} />
+        <Controls />
+        <MiniMap nodeColor={(node) => {
+          switch (node.data?.shapeType) {
+            case 'start': case 'end': return '#0F4C75';
+            case 'connector-source': return '#9333ea';
+            case 'connector-target': return '#6366f1';
+            case 'map': return '#f59e0b';
+            case 'try-catch': return '#ef4444';
+            default: return '#6b7280';
+          }
+        }} />
       </ReactFlow>
     </div>
   );

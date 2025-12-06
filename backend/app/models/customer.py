@@ -6,6 +6,17 @@ from typing import Optional, Literal
 from pydantic import BaseModel, Field
 
 
+class BoomiDeploymentSettings(BaseModel):
+    """Boomi deployment target settings - used in generated XML headers."""
+    folderId: str = "Rjo3NTQ1MTg0"
+    folderName: str = "MigrationPoC"
+    folderFullPath: str = "Jade Global, Inc./MigrationPoC"
+    branchId: str = "QjoyOTQwMQ"
+    branchName: str = "main"
+    createdBy: str = "vinit.verma@jadeglobal.com"
+    modifiedBy: str = "vinit.verma@jadeglobal.com"
+
+
 class BoomiSettings(BaseModel):
     """Boomi API connection settings."""
     accountId: str = ""
@@ -13,6 +24,7 @@ class BoomiSettings(BaseModel):
     apiToken: str = ""  # Will be encrypted
     baseUrl: str = "https://api.boomi.com/api/rest/v1"
     defaultFolder: str = "Jade Global, Inc./MigrationPoC"
+    deployment: BoomiDeploymentSettings = Field(default_factory=BoomiDeploymentSettings)
 
 
 class LLMSettings(BaseModel):

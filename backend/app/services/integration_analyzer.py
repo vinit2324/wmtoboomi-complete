@@ -2,292 +2,229 @@
 Integration Pattern Analyzer - Groups related services into complete integration flows
 """
 
-from typing import Dict, List, Any
-import re
+from typing import Dict, List, Any, Set, Tuple
+
 
 class IntegrationAnalyzer:
     """Analyze and group services into integration patterns"""
     
+    DOMAIN_DOCUMENT_MAP = {
+        'b2b': ['order', 'invoice', 'shipment', 'asn', 'edi', '850', '810', '856', 'customer', 'canonical'],
+        'edi': ['edi', '850', '810', '856', '997', '940', '945'],
+        'inbound': ['order', '850', 'purchase', 'request', 'receive', 'canonical', 'customer'],
+        'outbound': ['invoice', 'shipment', 'asn', '856', '810', 'response', 'send'],
+        'crm': ['customer', 'account', 'opportunity', 'contact', 'sfdc', 'salesforce', 'master'],
+        'sfdc': ['customer', 'account', 'opportunity', 'sfdc', 'salesforce'],
+        'erp': ['order', 'invoice', 'material', 'inventory', 'sap', 'idoc', 'sales'],
+        'sap': ['idoc', 'material', 'order', 'invoice', 'sap', 'bapi', 'canonical'],
+        'finance': ['invoice', 'payment', 'cash', 'gl', 'ar', 'ap'],
+        'payment': ['payment', 'batch', 'cash', 'invoice'],
+        'hls': ['hl7', 'adt', 'fhir', 'patient', 'clinical'],
+        'hl7': ['hl7', 'adt', 'patient', 'clinical'],
+        'logistics': ['shipment', 'carrier', 'tracking', 'warehouse', 'asn'],
+        'orchestration': ['order', 'invoice', 'payment', 'shipment', 'canonical'],
+    }
+    
+    SOURCE_DOC_PATTERNS = ['request', 'input', 'inbound', '850', 'order', 'receive', 'master', 'customer']
+    TARGET_DOC_PATTERNS = ['response', 'output', 'outbound', '810', '856', 'invoice', 'shipment', 'send']
+    
+    ADAPTER_PATTERNS = {
+        'sfdc': 'Salesforce', 'salesforce': 'Salesforce', 'pub.sfdc': 'Salesforce',
+        'sap': 'SAP', 'idoc': 'SAP', 'bapi': 'SAP', 'pub.sap': 'SAP',
+        'jdbc': 'Database', 'pub.db': 'Database', 'pub.jdbc': 'Database',
+        'http': 'HTTP Client', 'pub.client:http': 'HTTP Client', 'rest': 'HTTP Client',
+        'jms': 'JMS', 'pub.jms': 'JMS',
+        'ftp': 'FTP', 'sftp': 'SFTP', 'pub.ftp': 'FTP',
+        'edi': 'EDI', 'pub.edi': 'EDI', 'wm.b2b.edi': 'EDI',
+        'as2': 'AS2', 'hl7': 'HL7',
+    }
+
     @staticmethod
     def analyze_integrations(parsed_data: Dict[str, Any]) -> Dict[str, Any]:
-        """Analyze services and group into integration patterns"""
-        
+        """
+        Main entry point - analyze services and group into integration patterns.
+        Returns dict with 'integrations' key for frontend compatibility.
+        """
         services = parsed_data.get('services', [])
         documents = parsed_data.get('documents', [])
-        dependencies = parsed_data.get('dependencies', [])
         
-        # Build dependency graph
-        dependency_map = {}
-        for dep in dependencies:
-            source = dep['from']
-            target = dep['to']
-            if source not in dependency_map:
-                dependency_map[source] = []
-            dependency_map[source].append(target)
+        if not services:
+            return {'integrations': [], 'totalIntegrations': 0}
         
-        # Identify integration patterns by analyzing service paths and names
-        integrations = IntegrationAnalyzer._identify_integrations(services, dependency_map)
-        
-        # Generate implementation steps for each integration
-        for integration in integrations:
-            integration['boomiSteps'] = IntegrationAnalyzer._generate_boomi_steps(
-                integration, services, documents
-            )
-        
-        return {
-            'integrations': integrations,
-            'totalIntegrations': len(integrations),
-            'dependencies': dependencies
-        }
-    
-    @staticmethod
-    def _identify_integrations(services: List[Dict], dependency_map: Dict) -> List[Dict]:
-        """Identify integration patterns"""
+        # Group services by functional area
+        service_groups: Dict[str, List[Dict]] = {}
+        for service in services:
+            service_path = service.get('name', '') or service.get('path', '')
+            area = IntegrationAnalyzer._get_functional_area(service_path)
+            if area not in service_groups:
+                service_groups[area] = []
+            service_groups[area].append(service)
         
         integrations = []
-        processed = set()
-        
-        # Group by functional area (from path structure)
-        functional_groups = {}
-        for service in services:
-            path_parts = service['name'].split('/')
+        for area, group_services in service_groups.items():
+            total_steps = sum(s.get('stepCount', 0) or len(s.get('flowSteps', [])) for s in group_services)
             
-            # Extract functional area (e.g., NS/enterprise/b2b/inbound)
-            if len(path_parts) >= 4:
-                functional_area = '/'.join(path_parts[:4])
+            # Count verbs
+            verb_counts = {}
+            for svc in group_services:
+                for step in svc.get('flowSteps', []):
+                    verb = step.get('type', 'UNKNOWN')
+                    verb_counts[verb] = verb_counts.get(verb, 0) + 1
+            
+            # Determine complexity
+            if total_steps <= 10:
+                complexity, automation, estimated_hours = 'low', '90%', 2
+            elif total_steps <= 25:
+                complexity, automation, estimated_hours = 'medium', '80%', 4
             else:
-                functional_area = '/'.join(path_parts[:-1])
+                complexity, automation, estimated_hours = 'high', '70%', 6
             
-            if functional_area not in functional_groups:
-                functional_groups[functional_area] = []
-            functional_groups[functional_area].append(service)
-        
-        # Create integrations from functional groups
-        for area, area_services in functional_groups.items():
-            if not area_services:
-                continue
+            # Detect adapters
+            adapters = IntegrationAnalyzer._detect_adapters(group_services, area)
+            
+            # Find relevant documents
+            source_docs, target_docs = IntegrationAnalyzer._find_relevant_documents(area, documents)
             
             integration = {
                 'name': IntegrationAnalyzer._generate_integration_name(area),
                 'functionalArea': area,
-                'services': [],
-                'documents': [],
-                'adapters': [],
-                'complexity': 'medium',
-                'automationLevel': '80%',
-                'estimatedHours': 0
+                'services': group_services,
+                'serviceCount': len(group_services),
+                'adapters': list(adapters),
+                'complexity': complexity,
+                'automation': automation,
+                'automationLevel': automation,
+                'estimatedHours': estimated_hours,
+                'verbCounts': verb_counts,
+                'totalSteps': total_steps,
+                'sourceDocuments': source_docs,
+                'targetDocuments': target_docs
             }
-            
-            total_steps = 0
-            for svc in area_services:
-                integration['services'].append({
-                    'name': svc['name'],
-                    'type': svc['type'],
-                    'complexity': svc.get('complexity', 'low'),
-                    'steps': len(svc.get('flowSteps', [])),
-                    'dependencies': dependency_map.get(svc['name'], [])
-                })
-                total_steps += len(svc.get('flowSteps', []))
-                
-                # Track adapters
-                if svc['type'] == 'AdapterService':
-                    adapter_type = svc.get('adapterType', 'Unknown')
-                    if adapter_type not in integration['adapters']:
-                        integration['adapters'].append(adapter_type)
-            
-            # Calculate complexity and estimate
-            integration['complexity'] = 'low' if total_steps < 20 else 'medium' if total_steps < 50 else 'high'
-            integration['estimatedHours'] = len(area_services) * 4 + len(integration['adapters']) * 2
-            
             integrations.append(integration)
         
-        return integrations
+        return {
+            'integrations': integrations,
+            'totalIntegrations': len(integrations)
+        }
+    
+    @staticmethod
+    def _detect_adapters(services: List[Dict], functional_area: str) -> Set[str]:
+        """Detect adapters/connectors from services and functional area."""
+        adapters = set()
+        
+        for svc in services:
+            # Check explicit adapters
+            if svc.get('adapters'):
+                for adapter in svc['adapters']:
+                    adapters.add(adapter)
+            
+            # Check adapter service type
+            if svc.get('type') == 'AdapterService':
+                adapters.add(svc.get('adapterType', 'Unknown'))
+            
+            # Check flow steps for service invocations
+            for step in svc.get('flowSteps', []):
+                step_name = (step.get('name', '') or '').lower()
+                for pattern, adapter_name in IntegrationAnalyzer.ADAPTER_PATTERNS.items():
+                    if pattern in step_name:
+                        adapters.add(adapter_name)
+            
+            # Check invocations
+            for inv in svc.get('invocations', []):
+                inv_name = (inv.get('service', '') if isinstance(inv, dict) else str(inv)).lower()
+                for pattern, adapter_name in IntegrationAnalyzer.ADAPTER_PATTERNS.items():
+                    if pattern in inv_name:
+                        adapters.add(adapter_name)
+        
+        # Infer from functional area
+        area_lower = functional_area.lower()
+        area_adapters = {
+            'sfdc': 'Salesforce', 'crm': 'Salesforce', 'salesforce': 'Salesforce',
+            'sap': 'SAP', 'erp': 'SAP', 'idoc': 'SAP',
+            'edi': 'EDI', 'b2b': 'EDI',
+            'hl7': 'HL7', 'hls': 'HL7',
+            'jdbc': 'Database', 'db': 'Database',
+            'jms': 'JMS', 'ftp': 'FTP', 'sftp': 'SFTP',
+            'http': 'HTTP Client', 'api': 'HTTP Client',
+        }
+        for keyword, adapter_name in area_adapters.items():
+            if keyword in area_lower:
+                adapters.add(adapter_name)
+        
+        return adapters
+    
+    @staticmethod
+    def _get_functional_area(service_path: str) -> str:
+        """Extract functional area from service path."""
+        if not service_path:
+            return 'unknown'
+        path = service_path.replace('\\', '/')
+        parts = [p for p in path.split('/') if p and p.lower() not in ['ns', 'pub', 'wm']]
+        if len(parts) >= 3:
+            return '/'.join(parts[:3])
+        elif len(parts) >= 2:
+            return '/'.join(parts[:2])
+        elif parts:
+            return parts[0]
+        return 'unknown'
     
     @staticmethod
     def _generate_integration_name(path: str) -> str:
-        """Generate friendly integration name from path"""
-        
+        """Generate friendly integration name from path."""
         parts = path.split('/')
-        if len(parts) >= 4:
-            # e.g., NS/enterprise/b2b/inbound -> "B2B Inbound Integration"
-            return ' '.join(parts[2:]).title() + " Integration"
-        return "Integration"
+        if len(parts) >= 3:
+            return ' '.join(parts[1:]).title().replace('_', ' ') + " Integration"
+        elif len(parts) >= 2:
+            return ' '.join(parts).title().replace('_', ' ') + " Integration"
+        return path.title().replace('_', ' ') + " Integration"
     
     @staticmethod
-    def _generate_boomi_steps(integration: Dict, all_services: List[Dict], all_documents: List[Dict]) -> List[Dict]:
-        """Generate step-by-step Boomi implementation guide"""
+    def _find_relevant_documents(functional_area: str, all_documents: List[Dict]) -> Tuple[List[Dict], List[Dict]]:
+        """Find documents relevant to an integration based on domain matching."""
+        source_docs, target_docs = [], []
+        if not all_documents:
+            return source_docs, target_docs
         
-        steps = []
-        step_num = 1
+        area_lower = functional_area.lower()
+        path_parts = area_lower.replace('/', ' ').replace('_', ' ').split()
         
-        # Step 1: Create Connectors for adapters
-        if integration['adapters']:
-            for adapter in integration['adapters']:
-                steps.append({
-                    'stepNumber': step_num,
-                    'category': 'Connector Setup',
-                    'title': f'Create {adapter} Connector',
-                    'description': f'Set up Boomi {adapter} connector with connection parameters',
-                    'boomiComponent': 'Connector',
-                    'automationLevel': '50%',
-                    'tasks': [
-                        f'Navigate to Build → Connectors',
-                        f'Create new {adapter} Connector',
-                        'Configure connection properties (host, port, credentials)',
-                        'Test connection',
-                        'Save connector'
-                    ]
-                })
-                step_num += 1
+        # Build relevant keywords
+        relevant_keywords: Set[str] = set()
+        for part in path_parts:
+            if part in ['ns', 'enterprise', 'pub']:
+                continue
+            relevant_keywords.add(part)
+            if part in IntegrationAnalyzer.DOMAIN_DOCUMENT_MAP:
+                relevant_keywords.update(IntegrationAnalyzer.DOMAIN_DOCUMENT_MAP[part])
         
-        # Step 2: Create Source Profiles
-        source_docs = IntegrationAnalyzer._identify_source_documents(integration, all_documents)
-        for doc in source_docs:
-            steps.append({
-                'stepNumber': step_num,
-                'category': 'Profile Creation',
-                'title': f'Create Source Profile: {doc["name"].split("/")[-1]}',
-                'description': f'Convert webMethods Document Type to Boomi Profile',
-                'boomiComponent': 'Profile (XML/JSON/EDI)',
-                'automationLevel': '90%',
-                'tasks': [
-                    'Navigate to Build → Profiles',
-                    'Create new XML/JSON/EDI Profile',
-                    f'Define schema with {len(doc.get("fields", []))} fields',
-                    'Set namespace and root element',
-                    'Validate profile structure',
-                    'Save profile'
-                ]
-            })
-            step_num += 1
+        for doc in all_documents:
+            doc_name = doc.get('name', '')
+            doc_simple = doc_name.split('/')[-1].lower().replace('_', '')
+            doc_path = doc_name.lower()
+            
+            # Check relevance
+            relevance = sum(1 for kw in relevant_keywords if kw in doc_simple or kw in doc_path)
+            for part in path_parts:
+                if part not in ['ns', 'enterprise', 'pub'] and part in doc_path:
+                    relevance += 2
+            
+            if relevance > 0:
+                is_source = any(p in doc_simple for p in IntegrationAnalyzer.SOURCE_DOC_PATTERNS)
+                is_target = any(p in doc_simple for p in IntegrationAnalyzer.TARGET_DOC_PATTERNS)
+                
+                if is_source and not is_target:
+                    source_docs.append(doc)
+                elif is_target and not is_source:
+                    target_docs.append(doc)
+                elif any(x in doc_simple for x in ['850', 'order', 'master', 'customer']):
+                    source_docs.append(doc)
+                else:
+                    target_docs.append(doc)
         
-        # Step 3: Create Target Profiles
-        target_docs = IntegrationAnalyzer._identify_target_documents(integration, all_documents)
-        for doc in target_docs:
-            steps.append({
-                'stepNumber': step_num,
-                'category': 'Profile Creation',
-                'title': f'Create Target Profile: {doc["name"].split("/")[-1]}',
-                'description': f'Convert webMethods Document Type to Boomi Profile',
-                'boomiComponent': 'Profile (XML/JSON/EDI)',
-                'automationLevel': '90%',
-                'tasks': [
-                    'Navigate to Build → Profiles',
-                    'Create new XML/JSON/EDI Profile',
-                    f'Define schema with {len(doc.get("fields", []))} fields',
-                    'Set namespace and root element',
-                    'Validate profile structure',
-                    'Save profile'
-                ]
-            })
-            step_num += 1
-        
-        # Step 4: Create Maps
-        if source_docs and target_docs:
-            steps.append({
-                'stepNumber': step_num,
-                'category': 'Mapping',
-                'title': 'Create Field Mappings',
-                'description': 'Map fields from source to target profiles',
-                'boomiComponent': 'Map',
-                'automationLevel': '70%',
-                'tasks': [
-                    'Navigate to Build → Maps',
-                    'Create new Map',
-                    'Select source and target profiles',
-                    'Map common fields automatically',
-                    'Add transformations (date formats, lookups, etc.)',
-                    'Add custom functions if needed',
-                    'Test map with sample data',
-                    'Save map'
-                ]
-            })
-            step_num += 1
-        
-        # Step 5: Create Process for each service
-        for svc in integration['services']:
-            if svc['type'] == 'FlowService':
-                steps.append({
-                    'stepNumber': step_num,
-                    'category': 'Process Creation',
-                    'title': f'Create Process: {svc["name"].split("/")[-1]}',
-                    'description': f'Convert webMethods Flow Service to Boomi Process ({svc["steps"]} steps)',
-                    'boomiComponent': 'Process',
-                    'automationLevel': '85%',
-                    'tasks': [
-                        'Navigate to Build → Processes',
-                        'Create new Process',
-                        'Add Start shape',
-                        f'Convert {svc["steps"]} flow steps to Boomi shapes',
-                        'Connect to connectors and profiles',
-                        'Add error handling (Try-Catch)',
-                        'Configure process properties',
-                        'Test process',
-                        'Save process'
-                    ]
-                })
-                step_num += 1
-        
-        # Step 6: Testing
-        steps.append({
-            'stepNumber': step_num,
-            'category': 'Testing',
-            'title': 'Integration Testing',
-            'description': 'End-to-end testing of complete integration',
-            'boomiComponent': 'Process',
-            'automationLevel': '30%',
-            'tasks': [
-                'Deploy to Test environment',
-                'Test with sample data',
-                'Verify data transformations',
-                'Test error scenarios',
-                'Validate against requirements',
-                'Fix any issues',
-                'Document test results'
-            ]
-        })
-        step_num += 1
-        
-        # Step 7: Deployment
-        steps.append({
-            'stepNumber': step_num,
-            'category': 'Deployment',
-            'title': 'Production Deployment',
-            'description': 'Deploy integration to production',
-            'boomiComponent': 'Environment',
-            'automationLevel': '50%',
-            'tasks': [
-                'Create deployment package',
-                'Deploy to Production atom',
-                'Configure production connections',
-                'Enable monitoring and alerts',
-                'Document deployment',
-                'Handoff to operations team'
-            ]
-        })
-        
-        return steps
-    
-    @staticmethod
-    def _identify_source_documents(integration: Dict, all_documents: List[Dict]) -> List[Dict]:
-        """Identify source documents for this integration"""
-        # Simplified - return related documents
-        return [doc for doc in all_documents if any(
-            svc['name'].split('/')[:-1] == doc['name'].split('/')[:-1] 
-            for svc in integration['services']
-        )][:2]
-    
-    @staticmethod
-    def _identify_target_documents(integration: Dict, all_documents: List[Dict]) -> List[Dict]:
-        """Identify target documents for this integration"""
-        # Simplified - return related documents
-        return [doc for doc in all_documents if any(
-            svc['name'].split('/')[:-1] == doc['name'].split('/')[:-1] 
-            for svc in integration['services']
-        )][:2]
+        return source_docs, target_docs
 
 
+# MAIN EXPORT FUNCTION - matches how router calls it
 def analyze_integrations(parsed_data: Dict[str, Any]) -> Dict[str, Any]:
-    """Main entry point"""
-    analyzer = IntegrationAnalyzer()
-    return analyzer.analyze_integrations(parsed_data)
+    """Main entry point called by router."""
+    return IntegrationAnalyzer.analyze_integrations(parsed_data)

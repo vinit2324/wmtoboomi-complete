@@ -1,7 +1,7 @@
 """Main FastAPI application"""
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.routers import customers, projects, conversions, integrations, logs, ai
+from app.routers import customers, projects, conversions, integrations, logs, ai, mappings
 
 app = FastAPI(
     title="webMethods to Boomi Migration Accelerator",
@@ -23,6 +23,7 @@ app.include_router(customers.router)
 app.include_router(projects.router)
 app.include_router(conversions.router)
 app.include_router(integrations.router)
+app.include_router(mappings.router)
 app.include_router(logs.router)
 app.include_router(ai.router)
 

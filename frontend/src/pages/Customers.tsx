@@ -3,17 +3,28 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   Users,
   Plus,
-  Edit2,
   Trash2,
-  Check,
-  X,
   Loader2,
   TestTube,
   Settings,
+  ChevronDown,
+  ChevronUp,
+  FolderOpen,
 } from 'lucide-react';
 import { customersApi } from '../utils/api';
 import { useStore } from '../stores/useStore';
 import type { Customer, CustomerSettings } from '../types';
+
+// Default Boomi Deployment Settings
+const defaultDeploymentSettings = {
+  folderId: 'Rjo3NTQ1MTg0',
+  folderName: 'MigrationPoC',
+  folderFullPath: 'Jade Global, Inc./MigrationPoC',
+  branchId: 'QjoyOTQwMQ',
+  branchName: 'main',
+  createdBy: 'vinit.verma@jadeglobal.com',
+  modifiedBy: 'vinit.verma@jadeglobal.com',
+};
 
 const defaultSettings: CustomerSettings = {
   boomi: {
@@ -22,6 +33,7 @@ const defaultSettings: CustomerSettings = {
     apiToken: '',
     baseUrl: 'https://api.boomi.com/api/rest/v1',
     defaultFolder: 'Jade Global, Inc./MigrationPoC',
+    deployment: defaultDeploymentSettings,
   },
   llm: {
     provider: 'openai',
@@ -42,6 +54,7 @@ export default function Customers() {
     settings: defaultSettings,
   });
   const [testResults, setTestResults] = useState<{ boomi?: string; llm?: string }>({});
+  const [expandedDeployment, setExpandedDeployment] = useState(false);
 
   const { data, isLoading } = useQuery({
     queryKey: ['customers'],
@@ -80,26 +93,46 @@ export default function Customers() {
 
   const openCreateModal = () => {
     setEditingCustomer(null);
-    setFormData({ customerName: '', settings: defaultSettings });
+    setFormData({ customerName: '', settings: JSON.parse(JSON.stringify(defaultSettings)) });
     setTestResults({});
+    setExpandedDeployment(false);
     setShowModal(true);
   };
 
   const openEditModal = (customer: Customer) => {
     setEditingCustomer(customer);
+    // Merge with defaults to ensure deployment settings exist
+    const mergedSettings = {
+      ...defaultSettings,
+      ...customer.settings,
+      boomi: {
+        ...defaultSettings.boomi,
+        ...customer.settings?.boomi,
+        deployment: {
+          ...defaultDeploymentSettings,
+          ...customer.settings?.boomi?.deployment,
+        },
+      },
+      llm: {
+        ...defaultSettings.llm,
+        ...customer.settings?.llm,
+      },
+    };
     setFormData({
       customerName: customer.customerName,
-      settings: customer.settings,
+      settings: mergedSettings,
     });
     setTestResults({});
+    setExpandedDeployment(false);
     setShowModal(true);
   };
 
   const closeModal = () => {
     setShowModal(false);
     setEditingCustomer(null);
-    setFormData({ customerName: '', settings: defaultSettings });
+    setFormData({ customerName: '', settings: JSON.parse(JSON.stringify(defaultSettings)) });
     setTestResults({});
+    setExpandedDeployment(false);
   };
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -135,6 +168,51 @@ export default function Customers() {
     } catch (error) {
       setTestResults((prev) => ({ ...prev, llm: '❌ Test failed' }));
     }
+  };
+
+  // Helper to update nested boomi settings
+  const updateBoomiSetting = (field: string, value: string) => {
+    setFormData((prev) => ({
+      ...prev,
+      settings: {
+        ...prev.settings,
+        boomi: {
+          ...prev.settings.boomi,
+          [field]: value,
+        },
+      },
+    }));
+  };
+
+  // Helper to update deployment settings
+  const updateDeploymentSetting = (field: string, value: string) => {
+    setFormData((prev) => ({
+      ...prev,
+      settings: {
+        ...prev.settings,
+        boomi: {
+          ...prev.settings.boomi,
+          deployment: {
+            ...prev.settings.boomi.deployment,
+            [field]: value,
+          },
+        },
+      },
+    }));
+  };
+
+  // Helper to update LLM settings
+  const updateLlmSetting = (field: string, value: string | number) => {
+    setFormData((prev) => ({
+      ...prev,
+      settings: {
+        ...prev.settings,
+        llm: {
+          ...prev.settings.llm,
+          [field]: value,
+        },
+      },
+    }));
   };
 
   return (
@@ -188,12 +266,17 @@ export default function Customers() {
                     <h3 className="font-semibold text-lg">{customer.customerName}</h3>
                     <div className="flex items-center gap-4 text-sm text-gray-500">
                       <span>
-                        Boomi: {customer.settings.boomi.accountId ? '✅ Configured' : '❌ Not set'}
+                        Boomi: {customer.settings?.boomi?.accountId ? '✅ Configured' : '❌ Not set'}
                       </span>
                       <span>
-                        LLM: {customer.settings.llm.apiKey ? '✅ Configured' : '❌ Not set'}
+                        LLM: {customer.settings?.llm?.apiKey ? '✅ Configured' : '❌ Not set'}
                       </span>
                     </div>
+                    {customer.settings?.boomi?.deployment?.folderFullPath && (
+                      <div className="text-xs text-gray-400 mt-1">
+                        Folder: {customer.settings.boomi.deployment.folderFullPath}
+                      </div>
+                    )}
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
@@ -277,15 +360,7 @@ export default function Customers() {
                       type="text"
                       className="input"
                       value={formData.settings.boomi.accountId}
-                      onChange={(e) =>
-                        setFormData({
-                          ...formData,
-                          settings: {
-                            ...formData.settings,
-                            boomi: { ...formData.settings.boomi, accountId: e.target.value },
-                          },
-                        })
-                      }
+                      onChange={(e) => updateBoomiSetting('accountId', e.target.value)}
                     />
                   </div>
                   <div>
@@ -294,15 +369,7 @@ export default function Customers() {
                       type="text"
                       className="input"
                       value={formData.settings.boomi.username}
-                      onChange={(e) =>
-                        setFormData({
-                          ...formData,
-                          settings: {
-                            ...formData.settings,
-                            boomi: { ...formData.settings.boomi, username: e.target.value },
-                          },
-                        })
-                      }
+                      onChange={(e) => updateBoomiSetting('username', e.target.value)}
                     />
                   </div>
                   <div className="col-span-2">
@@ -311,18 +378,107 @@ export default function Customers() {
                       type="password"
                       className="input"
                       value={formData.settings.boomi.apiToken}
-                      onChange={(e) =>
-                        setFormData({
-                          ...formData,
-                          settings: {
-                            ...formData.settings,
-                            boomi: { ...formData.settings.boomi, apiToken: e.target.value },
-                          },
-                        })
-                      }
+                      onChange={(e) => updateBoomiSetting('apiToken', e.target.value)}
                       placeholder="Enter to update..."
                     />
                   </div>
+                </div>
+
+                {/* Deployment Settings - Collapsible */}
+                <div className="mt-4 pt-4 border-t border-gray-200">
+                  <button
+                    type="button"
+                    onClick={() => setExpandedDeployment(!expandedDeployment)}
+                    className="flex items-center gap-2 text-sm font-medium text-gray-700 hover:text-jade-600 w-full"
+                  >
+                    <FolderOpen className="w-4 h-4" />
+                    <span>Boomi Folder & Deployment Settings</span>
+                    {expandedDeployment ? (
+                      <ChevronUp className="w-4 h-4 ml-auto" />
+                    ) : (
+                      <ChevronDown className="w-4 h-4 ml-auto" />
+                    )}
+                  </button>
+
+                  {expandedDeployment && (
+                    <div className="mt-4 space-y-4 bg-gray-50 p-4 rounded-lg">
+                      <p className="text-xs text-gray-500">
+                        These settings determine where converted components are deployed in Boomi.
+                      </p>
+                      <div className="grid grid-cols-2 gap-4">
+                        <div className="col-span-2">
+                          <label className="label">Folder Full Path</label>
+                          <input
+                            type="text"
+                            className="input"
+                            value={formData.settings.boomi.deployment?.folderFullPath || ''}
+                            onChange={(e) => updateDeploymentSetting('folderFullPath', e.target.value)}
+                            placeholder="e.g., Company Name/MigrationPoC"
+                          />
+                        </div>
+                        <div>
+                          <label className="label">Folder ID</label>
+                          <input
+                            type="text"
+                            className="input"
+                            value={formData.settings.boomi.deployment?.folderId || ''}
+                            onChange={(e) => updateDeploymentSetting('folderId', e.target.value)}
+                            placeholder="e.g., Rjo3NTQ1MTg0"
+                          />
+                        </div>
+                        <div>
+                          <label className="label">Folder Name</label>
+                          <input
+                            type="text"
+                            className="input"
+                            value={formData.settings.boomi.deployment?.folderName || ''}
+                            onChange={(e) => updateDeploymentSetting('folderName', e.target.value)}
+                            placeholder="e.g., MigrationPoC"
+                          />
+                        </div>
+                        <div>
+                          <label className="label">Branch ID</label>
+                          <input
+                            type="text"
+                            className="input"
+                            value={formData.settings.boomi.deployment?.branchId || ''}
+                            onChange={(e) => updateDeploymentSetting('branchId', e.target.value)}
+                            placeholder="e.g., QjoyOTQwMQ"
+                          />
+                        </div>
+                        <div>
+                          <label className="label">Branch Name</label>
+                          <input
+                            type="text"
+                            className="input"
+                            value={formData.settings.boomi.deployment?.branchName || ''}
+                            onChange={(e) => updateDeploymentSetting('branchName', e.target.value)}
+                            placeholder="e.g., main"
+                          />
+                        </div>
+                        <div>
+                          <label className="label">Created By (Email)</label>
+                          <input
+                            type="email"
+                            className="input"
+                            value={formData.settings.boomi.deployment?.createdBy || ''}
+                            onChange={(e) => updateDeploymentSetting('createdBy', e.target.value)}
+                            placeholder="e.g., user@company.com"
+                          />
+                        </div>
+                        <div>
+                          <label className="label">Modified By (Email)</label>
+                          <input
+                            type="email"
+                            className="input"
+                            value={formData.settings.boomi.deployment?.modifiedBy || ''}
+                            onChange={(e) => updateDeploymentSetting('modifiedBy', e.target.value)}
+                            placeholder="e.g., user@company.com"
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -350,18 +506,7 @@ export default function Customers() {
                     <select
                       className="input"
                       value={formData.settings.llm.provider}
-                      onChange={(e) =>
-                        setFormData({
-                          ...formData,
-                          settings: {
-                            ...formData.settings,
-                            llm: {
-                              ...formData.settings.llm,
-                              provider: e.target.value as 'openai' | 'anthropic' | 'gemini' | 'ollama',
-                            },
-                          },
-                        })
-                      }
+                      onChange={(e) => updateLlmSetting('provider', e.target.value)}
                     >
                       <option value="openai">OpenAI</option>
                       <option value="anthropic">Anthropic (Claude)</option>
@@ -375,15 +520,7 @@ export default function Customers() {
                       type="text"
                       className="input"
                       value={formData.settings.llm.model}
-                      onChange={(e) =>
-                        setFormData({
-                          ...formData,
-                          settings: {
-                            ...formData.settings,
-                            llm: { ...formData.settings.llm, model: e.target.value },
-                          },
-                        })
-                      }
+                      onChange={(e) => updateLlmSetting('model', e.target.value)}
                     />
                   </div>
                   <div className="col-span-2">
@@ -392,15 +529,7 @@ export default function Customers() {
                       type="password"
                       className="input"
                       value={formData.settings.llm.apiKey}
-                      onChange={(e) =>
-                        setFormData({
-                          ...formData,
-                          settings: {
-                            ...formData.settings,
-                            llm: { ...formData.settings.llm, apiKey: e.target.value },
-                          },
-                        })
-                      }
+                      onChange={(e) => updateLlmSetting('apiKey', e.target.value)}
                       placeholder="Enter to update..."
                     />
                   </div>
