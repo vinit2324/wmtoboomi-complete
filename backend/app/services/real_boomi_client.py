@@ -1,5 +1,5 @@
 """
-Real Boomi API Client - Uses Exact Format from Vinit's Postman Setup
+Real Boomi API Client - Uses Exact Format
 """
 
 import httpx
